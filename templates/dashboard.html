@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Bybit Bot Dashboard</title>
+
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: Arial;
+        }
+
+        h1, h2 {
+            color: #00ffcc;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: #1e1e1e;
+        }
+
+        th, td {
+            border: 1px solid #333;
+            padding: 8px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #2c2c2c;
+        }
+
+        tr:nth-child(even) {
+            background-color: #1a1a1a;
+        }
+
+        .win {
+            color: #00ff00;
+        }
+
+        .loss {
+            color: #ff4d4d;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🚀 Bybit Bot Dashboard</h1>
+
+    <h2>요약</h2>
+    <ul>
+        <li>총 거래 수: {{ summary.total_trades }}</li>
+        <li>승리: {{ summary.win_trades }}</li>
+        <li>패배: {{ summary.loss_trades }}</li>
+        <li>승률: {{ summary.win_rate }}%</li>
+        <li>총 손익: 
+            {% if summary.total_pnl > 0 %}
+                <span class="win">{{ summary.total_pnl }}</span>
+            {% else %}
+                <span class="loss">{{ summary.total_pnl }}</span>
+            {% endif %}
+            USDT
+        </li>
+    </ul>
+
+    <h2>전략 성능 비교</h2>
+    <ul>
+        <li>
+            <strong>A 전략</strong> →
+            거래: {{ strategy_stats.A.total }},
+            승률: {{ strategy_stats.A.win_rate }}%,
+            손익:
+            {% if strategy_stats.A.pnl > 0 %}
+                <span class="win">{{ strategy_stats.A.pnl }}</span>
+            {% else %}
+                <span class="loss">{{ strategy_stats.A.pnl }}</span>
+            {% endif %}
+            USDT
+        </li>
+
+        <li>
+            <strong>B 전략</strong> →
+            거래: {{ strategy_stats.B.total }},
+            승률: {{ strategy_stats.B.win_rate }}%,
+            손익:
+            {% if strategy_stats.B.pnl > 0 %}
+                <span class="win">{{ strategy_stats.B.pnl }}</span>
+            {% else %}
+                <span class="loss">{{ strategy_stats.B.pnl }}</span>
+            {% endif %}
+            USDT
+        </li>
+    </ul>
+
+    <h2>최근 종료 거래 5개</h2>
+    <table>
+        <tr>
+            <th>시간</th>
+            <th>종목</th>
+            <th>방향</th>
+            <th>타입</th>
+            <th>진입가</th>
+            <th>청산가</th>
+            <th>손익(USDT)</th>
+            <th>손익(%)</th>
+            <th>청산사유</th>
+        </tr>
+
+        {% for trade in summary.recent_exits %}
+        <tr>
+            <td>{{ trade.time }}</td>
+            <td>{{ trade.symbol }}</td>
+            <td>{{ trade.position_direction }}</td>
+            <td>{{ trade.entry_type }}</td>
+            <td>{{ trade.entry_price }}</td>
+            <td>{{ trade.exit_price }}</td>
+
+            <td>
+                {% if trade.pnl_usdt|float > 0 %}
+                    <span class="win">{{ trade.pnl_usdt }}</span>
+                {% else %}
+                    <span class="loss">{{ trade.pnl_usdt }}</span>
+                {% endif %}
+            </td>
+
+            <td>{{ trade.pnl_pct }}</td>
+            <td>{{ trade.exit_reason }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
