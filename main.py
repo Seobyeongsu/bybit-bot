@@ -23,7 +23,6 @@ load_dotenv()
 DEMO_MODE = True
 CATEGORY = "linear"
 
-# 튜닝 버전: DOGE / LINK 제외
 SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -48,21 +47,21 @@ ADX_PERIOD = 14
 ATR_PERIOD = 14
 VOL_MA_PERIOD = 20
 
-# 진입 조건 (기대값 강화 버전)
-ADX_MIN = 20
-ADX_STRONG = 28
-B_PULLBACK_VALID_BARS = 4
-MIN_BODY_RATIO = 0.35           # 진입 캔들 몸통 비율 최소
-MIN_VOL_RATIO_A = 1.00          # A급 최소 거래량 비율
-MIN_VOL_RATIO_B = 1.08          # B급 최소 거래량 비율
+# 진입 조건 (살짝 완화 버전)
+ADX_MIN = 18
+ADX_STRONG = 26
+B_PULLBACK_VALID_BARS = 5
+MIN_BODY_RATIO = 0.28
+MIN_VOL_RATIO_A = 0.95
+MIN_VOL_RATIO_B = 1.00
 
 # 리스크
 RISK_PER_TRADE = 0.01
 STOP_ATR_MULTIPLIER = 1.6
 
 # 부분익절 / 기대값 강화
-PARTIAL_TP_R_MULTIPLIER = 1.8   # 기존 1.5 -> 1.8
-PARTIAL_CLOSE_RATIO = 0.35      # 기존 50% -> 35%
+PARTIAL_TP_R_MULTIPLIER = 1.8
+PARTIAL_CLOSE_RATIO = 0.35
 
 # 트레일링 강화
 TRAIL_ACTIVATE_ATR = 2.0
@@ -73,7 +72,7 @@ MAX_POSITION_RATIO = 0.30
 MAX_TOTAL_EXPOSURE = 0.45
 
 # 재진입 제한
-REENTRY_BLOCK_BARS = 4
+REENTRY_BLOCK_BARS = 3
 STRONG_TREND_REENTRY_BARS = 2
 
 # 루프
@@ -534,8 +533,8 @@ def get_higher_tf_trend(symbol: str):
     ema200 = safe_float(last["ema200"])
     ema50_prev = safe_float(prev["ema50"])
 
-    slope_ok_up = ema50 > ema50_prev
-    slope_ok_down = ema50 < ema50_prev
+    slope_ok_up = ema50 >= ema50_prev
+    slope_ok_down = ema50 <= ema50_prev
 
     if ema50 > ema200:
         return "UP", slope_ok_up
@@ -666,14 +665,12 @@ def get_entry_signal(symbol: str):
         and (ema9 > ema21)
         and (current_price > ema21)
         and (current_price > safe_float(p1["high"]))
-        and (current_price > current_open)
     )
     bearish_cross = (
         (safe_float(p1["ema9"]) >= safe_float(p1["ema21"]))
         and (ema9 < ema21)
         and (current_price < ema21)
         and (current_price < safe_float(p1["low"]))
-        and (current_price < current_open)
     )
 
     adx_ok = adx >= ADX_MIN
@@ -730,7 +727,6 @@ def get_B_signal(symbol: str, signal: dict):
         if (
             signal["current_price"] > ref_high
             and signal["ema9"] > signal["ema21"]
-            and signal["current_price"] > signal["current_open"]
             and signal["vol_ratio"] >= MIN_VOL_RATIO_B
         ):
             return True, "LONG"
@@ -740,7 +736,6 @@ def get_B_signal(symbol: str, signal: dict):
         if (
             signal["current_price"] < ref_low
             and signal["ema9"] < signal["ema21"]
-            and signal["current_price"] < signal["current_open"]
             and signal["vol_ratio"] >= MIN_VOL_RATIO_B
         ):
             return True, "SHORT"
@@ -1238,10 +1233,6 @@ def process_symbol(symbol: str, wallet_info: dict):
             print(f"[{now_kst_str()}] {symbol} NO TRADE | higher trend NONE")
             return
 
-        if not slope_ok:
-            print(f"[{now_kst_str()}] {symbol} NO TRADE | slope weak")
-            return
-
         if not signal["adx_ok"]:
             print(f"[{now_kst_str()}] {symbol} NO TRADE | ADX low")
             return
@@ -1254,11 +1245,11 @@ def process_symbol(symbol: str, wallet_info: dict):
         short_ready = False
         entry_type = ""
 
-        if higher_trend == "UP" and signal["long_A"] and signal["adx_improving"]:
+        if higher_trend == "UP" and signal["long_A"]:
             long_ready = True
             entry_type = "A"
 
-        elif higher_trend == "DOWN" and signal["short_A"] and signal["adx_improving"]:
+        elif higher_trend == "DOWN" and signal["short_A"]:
             short_ready = True
             entry_type = "A"
 
@@ -1273,17 +1264,23 @@ def process_symbol(symbol: str, wallet_info: dict):
 
         if long_ready:
             ok, reason = open_position(symbol, "LONG", entry_type, signal, wallet_info)
-            print(f"[{now_kst_str()}] {symbol} LONG READY | type={entry_type} | result={ok} | reason={reason}")
+            print(
+                f"[{now_kst_str()}] {symbol} LONG READY | "
+                f"type={entry_type} | slope_ok={slope_ok} | result={ok} | reason={reason}"
+            )
             return
 
         if short_ready:
             ok, reason = open_position(symbol, "SHORT", entry_type, signal, wallet_info)
-            print(f"[{now_kst_str()}] {symbol} SHORT READY | type={entry_type} | result={ok} | reason={reason}")
+            print(
+                f"[{now_kst_str()}] {symbol} SHORT READY | "
+                f"type={entry_type} | slope_ok={slope_ok} | result={ok} | reason={reason}"
+            )
             return
 
         print(
             f"[{now_kst_str()}] {symbol} NO TRADE | "
-            f"trend={higher_trend} | adx={signal['adx']:.2f} | vol={signal['vol_ratio']:.2f}"
+            f"trend={higher_trend} | adx={signal['adx']:.2f} | vol={signal['vol_ratio']:.2f} | slope_ok={slope_ok}"
         )
 
     except Exception as e:
@@ -1334,12 +1331,12 @@ def bootstrap_state():
 # main
 # =========================================================
 def main():
-    print(f"[{now_kst_str()}] === Bybit Auto Bot tuned expectancy version start ===")
+    print(f"[{now_kst_str()}] === Bybit Auto Bot relaxed tuned version start ===")
     bootstrap_state()
 
     send_telegram_message(
-        f"[봇 시작]\n상태: 튜닝 기대값 강화 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
-        key="bot_start_tuned"
+        f"[봇 시작]\n상태: 살짝 완화 튜닝 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
+        key="bot_start_relaxed"
     )
 
     while True:
