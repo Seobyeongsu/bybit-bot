@@ -1,9 +1,15 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, send_file
 import csv
+import os
 
 app = Flask(__name__)
 
-TRADE_LOG_FILE = "trade_log.csv"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+TRADE_LOG_FILE = os.path.join(BASE_DIR, "trade_log.csv")
+BOT_LOG_FILE = os.path.join(BASE_DIR, "bot.log")
+STATUS_LOG_FILE = os.path.join(BASE_DIR, "status_log.csv")
+BALANCE_LOG_FILE = os.path.join(BASE_DIR, "balance_log.csv")
 
 
 def load_trade_data():
@@ -47,7 +53,7 @@ def get_trade_summary(trades):
             win_trades += 1
 
     win_rate = (win_trades / total_trades * 100) if total_trades > 0 else 0
-    recent_exits = list(reversed(exit_trades))[:5]
+    recent_exits = list(reversed(exit_trades))[:10]
 
     return {
         "total_trades": total_trades,
@@ -107,6 +113,34 @@ def dashboard():
         summary=summary,
         strategy_stats=strategy_stats
     )
+
+
+@app.route("/download/trade-log")
+def download_trade_log():
+    if os.path.exists(TRADE_LOG_FILE):
+        return send_file(TRADE_LOG_FILE, as_attachment=True)
+    return "trade_log.csv 파일이 없습니다.", 404
+
+
+@app.route("/download/bot-log")
+def download_bot_log():
+    if os.path.exists(BOT_LOG_FILE):
+        return send_file(BOT_LOG_FILE, as_attachment=True)
+    return "bot.log 파일이 없습니다.", 404
+
+
+@app.route("/download/status-log")
+def download_status_log():
+    if os.path.exists(STATUS_LOG_FILE):
+        return send_file(STATUS_LOG_FILE, as_attachment=True)
+    return "status_log.csv 파일이 없습니다.", 404
+
+
+@app.route("/download/balance-log")
+def download_balance_log():
+    if os.path.exists(BALANCE_LOG_FILE):
+        return send_file(BALANCE_LOG_FILE, as_attachment=True)
+    return "balance_log.csv 파일이 없습니다.", 404
 
 
 if __name__ == "__main__":

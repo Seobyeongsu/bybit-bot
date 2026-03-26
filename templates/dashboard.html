@@ -1,133 +1,263 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bybit Bot Dashboard</title>
-
     <style>
         body {
-            background-color: #121212;
-            color: #ffffff;
-            font-family: Arial;
+            font-family: Arial, sans-serif;
+            background: #111827;
+            color: #f9fafb;
+            margin: 0;
+            padding: 0;
         }
 
-        h1, h2 {
-            color: #00ffcc;
+        .container {
+            width: 95%;
+            max-width: 1200px;
+            margin: 30px auto;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        .sub {
+            color: #9ca3af;
+            margin-bottom: 24px;
+        }
+
+        .download-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 24px;
+        }
+
+        .download-buttons a {
+            text-decoration: none;
+        }
+
+        .download-buttons button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .download-buttons button:hover {
+            background: #1d4ed8;
+        }
+
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: #1f2937;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+        }
+
+        .card h2 {
+            font-size: 15px;
+            color: #9ca3af;
+            margin: 0 0 10px 0;
+        }
+
+        .card .value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section h2 {
+            margin-bottom: 14px;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            background-color: #1e1e1e;
+            background: #1f2937;
+            border-radius: 12px;
+            overflow: hidden;
         }
 
         th, td {
-            border: 1px solid #333;
-            padding: 8px;
+            padding: 12px 10px;
             text-align: center;
+            border-bottom: 1px solid #374151;
+            font-size: 14px;
         }
 
         th {
-            background-color: #2c2c2c;
+            background: #374151;
+            color: #f9fafb;
         }
 
-        tr:nth-child(even) {
-            background-color: #1a1a1a;
+        tr:last-child td {
+            border-bottom: none;
         }
 
         .win {
-            color: #00ff00;
+            color: #22c55e;
+            font-weight: bold;
         }
 
         .loss {
-            color: #ff4d4d;
+            color: #ef4444;
+            font-weight: bold;
+        }
+
+        .neutral {
+            color: #e5e7eb;
+            font-weight: bold;
+        }
+
+        .footer-note {
+            margin-top: 20px;
+            color: #9ca3af;
+            font-size: 13px;
+        }
+
+        @media (max-width: 768px) {
+            .card .value {
+                font-size: 22px;
+            }
+
+            th, td {
+                font-size: 12px;
+                padding: 10px 6px;
+            }
+
+            .download-buttons button {
+                width: 100%;
+            }
         }
     </style>
 </head>
-
 <body>
-    <h1>🚀 Bybit Bot Dashboard</h1>
+    <div class="container">
+        <h1>Bybit Bot Dashboard</h1>
+        <div class="sub">자동매매 현황 / 승률 / 손익 / 로그 다운로드</div>
 
-    <h2>요약</h2>
-    <ul>
-        <li>총 거래 수: {{ summary.total_trades }}</li>
-        <li>승리: {{ summary.win_trades }}</li>
-        <li>패배: {{ summary.loss_trades }}</li>
-        <li>승률: {{ summary.win_rate }}%</li>
-        <li>총 손익: 
-            {% if summary.total_pnl > 0 %}
-                <span class="win">{{ summary.total_pnl }}</span>
-            {% else %}
-                <span class="loss">{{ summary.total_pnl }}</span>
-            {% endif %}
-            USDT
-        </li>
-    </ul>
+        <div class="download-buttons">
+            <a href="/download/trade-log"><button>거래로그 다운로드</button></a>
+            <a href="/download/bot-log"><button>봇로그 다운로드</button></a>
+            <a href="/download/status-log"><button>상태로그 다운로드</button></a>
+            <a href="/download/balance-log"><button>잔고로그 다운로드</button></a>
+        </div>
 
-    <h2>전략 성능 비교</h2>
-    <ul>
-        <li>
-            <strong>A 전략</strong> →
-            거래: {{ strategy_stats.A.total }},
-            승률: {{ strategy_stats.A.win_rate }}%,
-            손익:
-            {% if strategy_stats.A.pnl > 0 %}
-                <span class="win">{{ strategy_stats.A.pnl }}</span>
-            {% else %}
-                <span class="loss">{{ strategy_stats.A.pnl }}</span>
-            {% endif %}
-            USDT
-        </li>
+        <div class="card-grid">
+            <div class="card">
+                <h2>총 거래 수</h2>
+                <div class="value">{{ summary.total_trades }}</div>
+            </div>
 
-        <li>
-            <strong>B 전략</strong> →
-            거래: {{ strategy_stats.B.total }},
-            승률: {{ strategy_stats.B.win_rate }}%,
-            손익:
-            {% if strategy_stats.B.pnl > 0 %}
-                <span class="win">{{ strategy_stats.B.pnl }}</span>
-            {% else %}
-                <span class="loss">{{ strategy_stats.B.pnl }}</span>
-            {% endif %}
-            USDT
-        </li>
-    </ul>
+            <div class="card">
+                <h2>승리 수</h2>
+                <div class="value win">{{ summary.win_trades }}</div>
+            </div>
 
-    <h2>최근 종료 거래 5개</h2>
-    <table>
-        <tr>
-            <th>시간</th>
-            <th>종목</th>
-            <th>방향</th>
-            <th>타입</th>
-            <th>진입가</th>
-            <th>청산가</th>
-            <th>손익(USDT)</th>
-            <th>손익(%)</th>
-            <th>청산사유</th>
-        </tr>
+            <div class="card">
+                <h2>패배 수</h2>
+                <div class="value loss">{{ summary.loss_trades }}</div>
+            </div>
 
-        {% for trade in summary.recent_exits %}
-        <tr>
-            <td>{{ trade.time }}</td>
-            <td>{{ trade.symbol }}</td>
-            <td>{{ trade.position_direction }}</td>
-            <td>{{ trade.entry_type }}</td>
-            <td>{{ trade.entry_price }}</td>
-            <td>{{ trade.exit_price }}</td>
+            <div class="card">
+                <h2>승률</h2>
+                <div class="value">{{ summary.win_rate }}%</div>
+            </div>
 
-            <td>
-                {% if trade.pnl_usdt|float > 0 %}
-                    <span class="win">{{ trade.pnl_usdt }}</span>
-                {% else %}
-                    <span class="loss">{{ trade.pnl_usdt }}</span>
-                {% endif %}
-            </td>
+            <div class="card">
+                <h2>총 손익 (USDT)</h2>
+                <div class="value {% if summary.total_pnl > 0 %}win{% elif summary.total_pnl < 0 %}loss{% else %}neutral{% endif %}">
+                    {{ summary.total_pnl }}
+                </div>
+            </div>
+        </div>
 
-            <td>{{ trade.pnl_pct }}</td>
-            <td>{{ trade.exit_reason }}</td>
-        </tr>
-        {% endfor %}
-    </table>
+        <div class="section">
+            <h2>전략별 통계</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>전략</th>
+                        <th>총 거래 수</th>
+                        <th>승리 수</th>
+                        <th>승률</th>
+                        <th>누적 손익 (USDT)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>A</td>
+                        <td>{{ strategy_stats["A"]["total"] }}</td>
+                        <td>{{ strategy_stats["A"]["win"] }}</td>
+                        <td>{{ strategy_stats["A"]["win_rate"] }}%</td>
+                        <td class="{% if strategy_stats['A']['pnl'] > 0 %}win{% elif strategy_stats['A']['pnl'] < 0 %}loss{% else %}neutral{% endif %}">
+                            {{ strategy_stats["A"]["pnl"] }}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>B</td>
+                        <td>{{ strategy_stats["B"]["total"] }}</td>
+                        <td>{{ strategy_stats["B"]["win"] }}</td>
+                        <td>{{ strategy_stats["B"]["win_rate"] }}%</td>
+                        <td class="{% if strategy_stats['B']['pnl'] > 0 %}win{% elif strategy_stats['B']['pnl'] < 0 %}loss{% else %}neutral{% endif %}">
+                            {{ strategy_stats["B"]["pnl"] }}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>최근 청산 거래</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>시간</th>
+                        <th>심볼</th>
+                        <th>방향</th>
+                        <th>전략</th>
+                        <th>진입가</th>
+                        <th>청산가</th>
+                        <th>손익 (USDT)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trade in summary.recent_exits %}
+                    <tr>
+                        <td>{{ trade.get("time", "-") }}</td>
+                        <td>{{ trade.get("symbol", "-") }}</td>
+                        <td>{{ trade.get("side", "-") }}</td>
+                        <td>{{ trade.get("entry_type", "-") }}</td>
+                        <td>{{ trade.get("entry_price", "-") }}</td>
+                        <td>{{ trade.get("exit_price", "-") }}</td>
+                        <td class="{% if trade.get('pnl_usdt', '0')|float > 0 %}win{% elif trade.get('pnl_usdt', '0')|float < 0 %}loss{% else %}neutral{% endif %}">
+                            {{ trade.get("pnl_usdt", "-") }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer-note">
+            새로고침하면 최신 trade_log.csv 기준으로 다시 계산됩니다.
+        </div>
+    </div>
 </body>
 </html>
