@@ -16,34 +16,29 @@ def load_trade_data():
 
     try:
         with open(TRADE_LOG_FILE, "r", encoding="utf-8-sig") as f:
-            lines = [line.strip() for line in f if line.strip()]
+            reader = csv.reader(f)
 
-        block_size = 13
-        i = 0
+            for row in reader:
+                if not row or len(row) < 14:
+                    continue
 
-        while i + block_size - 1 < len(lines):
-            try:
                 trade = {
-                    "time": lines[i],
-                    "symbol": lines[i + 1],
-                    "side": lines[i + 2],
-                    "action": lines[i + 3],
-                    "entry_type": lines[i + 4],
-                    "entry_price": lines[i + 5],
-                    "exit_price": lines[i + 6],
-                    "qty": lines[i + 7],
-                    "pnl_usdt": lines[i + 8],
-                    "pnl_pct": lines[i + 9],
-                    "exit_reason": lines[i + 10],
-                    "entry_adx": lines[i + 11],
-                    "entry_atr": lines[i + 12],
-                    "entry_vol_ratio": "",
+                    "time": row[0].strip(),
+                    "symbol": row[1].strip(),
+                    "side": row[2].strip(),
+                    "action": row[3].strip(),
+                    "entry_type": row[4].strip(),
+                    "entry_price": row[5].strip(),
+                    "exit_price": row[6].strip(),
+                    "qty": row[7].strip(),
+                    "pnl_usdt": row[8].strip(),
+                    "pnl_pct": row[9].strip(),
+                    "exit_reason": row[10].strip(),
+                    "entry_adx": row[11].strip(),
+                    "entry_atr": row[12].strip(),
+                    "entry_vol_ratio": row[13].strip(),
                 }
                 trades.append(trade)
-                i += block_size
-            except Exception as e:
-                print("블록 파싱 오류:", e)
-                break
 
         print(f"로드된 거래 수: {len(trades)}")
 
