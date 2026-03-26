@@ -1,5 +1,4 @@
 from flask import Flask, render_template, send_file
-import csv
 import os
 
 app = Flask(__name__)
@@ -17,9 +16,34 @@ def load_trade_data():
 
     try:
         with open(TRADE_LOG_FILE, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                trades.append(row)
+            lines = [line.strip() for line in f if line.strip()]
+
+        block_size = 13
+        i = 0
+
+        while i + block_size - 1 < len(lines):
+            try:
+                trade = {
+                    "time": lines[i],
+                    "symbol": lines[i + 1],
+                    "side": lines[i + 2],
+                    "action": lines[i + 3],
+                    "entry_type": lines[i + 4],
+                    "entry_price": lines[i + 5],
+                    "exit_price": lines[i + 6],
+                    "qty": lines[i + 7],
+                    "pnl_usdt": lines[i + 8],
+                    "pnl_pct": lines[i + 9],
+                    "exit_reason": lines[i + 10],
+                    "entry_adx": lines[i + 11],
+                    "entry_atr": lines[i + 12],
+                    "entry_vol_ratio": "",
+                }
+                trades.append(trade)
+                i += block_size
+            except Exception as e:
+                print("블록 파싱 오류:", e)
+                break
 
         print(f"로드된 거래 수: {len(trades)}")
 
@@ -33,7 +57,7 @@ def get_trade_summary(trades):
     exit_trades = []
 
     for t in trades:
-        action = t.get("action", "").strip()
+        action = t.get("action", "").strip().upper()
         if action == "EXIT":
             exit_trades.append(t)
 
@@ -44,7 +68,7 @@ def get_trade_summary(trades):
     for t in exit_trades:
         try:
             pnl = float(t.get("pnl_usdt", 0))
-        except:
+        except Exception:
             pnl = 0.0
 
         total_pnl += pnl
@@ -72,7 +96,7 @@ def get_strategy_stats(trades):
     }
 
     for t in trades:
-        if t.get("action", "").strip() != "EXIT":
+        if t.get("action", "").strip().upper() != "EXIT":
             continue
 
         strategy = t.get("entry_type", "").strip()
@@ -82,7 +106,7 @@ def get_strategy_stats(trades):
 
         try:
             pnl = float(t.get("pnl_usdt", 0))
-        except:
+        except Exception:
             pnl = 0.0
 
         result[strategy]["total"] += 1
