@@ -4,6 +4,8 @@ import os
 import time
 import math
 import traceback
+import atexit
+import signal
 from datetime import datetime
 from pathlib import Path
 
@@ -33,8 +35,8 @@ SYMBOLS = [
 ]
 
 # 타임프레임
-HIGHER_INTERVAL = "60"   # 1시간
-ENTRY_INTERVAL = "15"    # 15분
+HIGHER_INTERVAL = "60"
+ENTRY_INTERVAL = "15"
 
 # 상위 TF 지표
 HTF_EMA_FAST = 50
@@ -47,7 +49,7 @@ ADX_PERIOD = 14
 ATR_PERIOD = 14
 VOL_MA_PERIOD = 20
 
-# 진입 조건 (살짝 완화 버전)
+# 진입 조건 (살짝 완화)
 ADX_MIN = 18
 ADX_STRONG = 26
 B_PULLBACK_VALID_BARS = 5
@@ -63,7 +65,7 @@ STOP_ATR_MULTIPLIER = 1.6
 PARTIAL_TP_R_MULTIPLIER = 1.8
 PARTIAL_CLOSE_RATIO = 0.35
 
-# 트레일링 강화
+# 트레일링
 TRAIL_ACTIVATE_ATR = 2.0
 TRAIL_ATR_MULTIPLIER = 1.4
 
@@ -82,7 +84,7 @@ LOOP_SLEEP_SEC = 30
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_TIMEOUT_SEC = 10
-TELEGRAM_COOLDOWN_SEC = 180
+TELEGRAM_COOLDOWN_SEC = 120
 
 # 로그 파일
 BASE_DIR = Path(__file__).resolve().parent
@@ -100,6 +102,7 @@ session = HTTP(
 
 instrument_cache = {}
 last_telegram_sent = {}
+shutdown_notified = False
 
 
 # =========================================================
@@ -134,6 +137,7 @@ state = {
         "entry_adx": None,
         "entry_atr": None,
         "entry_vol_ratio": None,
+        "original_entry_price": None,
 
         "pullback_active": False,
         "pullback_direction": "",
@@ -177,10 +181,11 @@ def telegram_enabled() -> bool:
     return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID and requests is not None)
 
 
-def send_telegram_message(text: str, key: str = "default"):
+def send_telegram_message(text: str, key: str = "default", force: bool = False):
     if not telegram_enabled():
         return
-    if not should_send_telegram(key):
+
+    if not force and not should_send_telegram(key):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -189,6 +194,28 @@ def send_telegram_message(text: str, key: str = "default"):
         requests.post(url, data=payload, timeout=TELEGRAM_TIMEOUT_SEC)
     except Exception:
         pass
+
+
+def notify_shutdown(reason: str):
+    global shutdown_notified
+    if shutdown_notified:
+        return
+    shutdown_notified = True
+    send_telegram_message(
+        f"[봇 종료]\n사유: {reason}\n시간: {now_kst_str()}",
+        key="bot_shutdown",
+        force=True
+    )
+
+
+def handle_exit_signal(signum, frame):
+    notify_shutdown(f"signal {signum}")
+    raise SystemExit(0)
+
+
+atexit.register(lambda: notify_shutdown("process exit"))
+signal.signal(signal.SIGINT, handle_exit_signal)
+signal.signal(signal.SIGTERM, handle_exit_signal)
 
 
 def interval_to_minutes(interval: str) -> int:
@@ -301,6 +328,16 @@ def normalize_qty(qty: float, step: float, min_qty: float) -> float:
     return qty
 
 
+def format_qty_for_order(symbol: str, qty: float) -> str:
+    info = get_instrument_info(symbol)
+    normalized = normalize_qty(qty, info["qty_step"], info["min_order_qty"])
+    if normalized <= 0:
+        return "0"
+
+    decimals = decimals_from_step(info["qty_step"])
+    return f"{normalized:.{decimals}f}"
+
+
 def candle_body_ratio(open_price: float, high_price: float, low_price: float, close_price: float) -> float:
     candle_range = max(high_price - low_price, 1e-9)
     body = abs(close_price - open_price)
@@ -323,6 +360,7 @@ def reset_position_state(symbol: str):
     state[symbol]["entry_adx"] = None
     state[symbol]["entry_atr"] = None
     state[symbol]["entry_vol_ratio"] = None
+    state[symbol]["original_entry_price"] = None
 
 
 def reset_pullback_state(symbol: str):
@@ -416,9 +454,8 @@ def set_leverage(symbol: str, leverage: str = "3"):
 
 
 def place_market_entry(symbol: str, side: str, qty: float):
-    info = get_instrument_info(symbol)
-    qty = normalize_qty(qty, info["qty_step"], info["min_order_qty"])
-    if qty <= 0:
+    qty_str = format_qty_for_order(symbol, qty)
+    if qty_str == "0":
         raise ValueError(f"{symbol} entry qty invalid after normalize")
 
     return session.place_order(
@@ -426,15 +463,14 @@ def place_market_entry(symbol: str, side: str, qty: float):
         symbol=symbol,
         side=side,
         orderType="Market",
-        qty=str(qty),
+        qty=qty_str,
         timeInForce="IOC"
     )
 
 
 def place_market_close(symbol: str, close_side: str, qty: float):
-    info = get_instrument_info(symbol)
-    qty = normalize_qty(qty, info["qty_step"], info["min_order_qty"])
-    if qty <= 0:
+    qty_str = format_qty_for_order(symbol, qty)
+    if qty_str == "0":
         raise ValueError(f"{symbol} close qty invalid after normalize")
 
     return session.place_order(
@@ -442,7 +478,7 @@ def place_market_close(symbol: str, close_side: str, qty: float):
         symbol=symbol,
         side=close_side,
         orderType="Market",
-        qty=str(qty),
+        qty=qty_str,
         reduceOnly=True,
         timeInForce="IOC"
     )
@@ -892,6 +928,7 @@ def open_position(symbol: str, direction: str, entry_type: str, signal: dict, wa
     state[symbol]["position_side"] = direction
     state[symbol]["position_qty"] = actual_qty
     state[symbol]["position_entry_price"] = actual_entry_price
+    state[symbol]["original_entry_price"] = actual_entry_price
     state[symbol]["last_entry_time"] = datetime.now()
     state[symbol]["last_entry_bar_time"] = bar_time
     state[symbol]["recent_entry_type"] = entry_type
@@ -948,19 +985,31 @@ def open_position(symbol: str, direction: str, entry_type: str, signal: dict, wa
 
 def close_partial_position(symbol: str, reason: str):
     direction = state[symbol]["position_side"]
-    entry_price = state[symbol]["position_entry_price"]
+    entry_price = state[symbol]["original_entry_price"] or state[symbol]["position_entry_price"]
     current_qty = state[symbol]["position_qty"]
 
     if direction == "NONE" or current_qty <= 0 or entry_price <= 0:
         return False
 
     info = get_instrument_info(symbol)
+
     partial_qty = current_qty * PARTIAL_CLOSE_RATIO
     partial_qty = normalize_qty(partial_qty, info["qty_step"], info["min_order_qty"])
 
     if partial_qty <= 0:
         print(f"[{now_kst_str()}] {symbol} PARTIAL SKIP | qty too small")
         return False
+
+    remaining_after_partial = normalize_qty(
+        current_qty - partial_qty,
+        info["qty_step"],
+        info["min_order_qty"]
+    )
+
+    # 남은 잔량이 최소수량 미만이면 부분익절 대신 전량청산
+    if remaining_after_partial <= 0:
+        print(f"[{now_kst_str()}] {symbol} PARTIAL -> FULL CLOSE | remain too small")
+        return close_position(symbol, "부분익절대신전량청산")
 
     close_side = "Sell" if direction == "LONG" else "Buy"
     result = place_market_close(symbol, close_side, partial_qty)
@@ -1008,9 +1057,10 @@ def close_partial_position(symbol: str, reason: str):
         return True
 
     state[symbol]["position_qty"] = remaining_pos["size"]
-    state[symbol]["position_entry_price"] = remaining_pos["avg_price"]
+    # 원래 진입가는 유지
+    state[symbol]["position_entry_price"] = state[symbol]["original_entry_price"]
     state[symbol]["partial_exit_done"] = True
-    state[symbol]["entry_stop_price"] = state[symbol]["position_entry_price"]
+    state[symbol]["entry_stop_price"] = state[symbol]["original_entry_price"]
 
     print(f"[{now_kst_str()}] {symbol} PARTIAL EXIT | qty={partial_qty} | exit={exit_price} | remaining={remaining_pos['size']}")
     print(result)
@@ -1020,19 +1070,19 @@ def close_partial_position(symbol: str, reason: str):
 def close_position(symbol: str, reason: str, exit_bar_time=None):
     direction = state[symbol]["position_side"]
     qty = state[symbol]["position_qty"]
-    entry_price = state[symbol]["position_entry_price"]
+    entry_price = state[symbol]["original_entry_price"] or state[symbol]["position_entry_price"]
 
     if direction == "NONE" or qty <= 0 or entry_price <= 0:
         return False
 
-    info = get_instrument_info(symbol)
-    qty = normalize_qty(qty, info["qty_step"], info["min_order_qty"])
-    if qty <= 0:
+    qty_str = format_qty_for_order(symbol, qty)
+    if qty_str == "0":
         print(f"[{now_kst_str()}] {symbol} CLOSE SKIP | qty too small after normalize")
         return False
 
+    qty_float = float(qty_str)
     close_side = "Sell" if direction == "LONG" else "Buy"
-    result = place_market_close(symbol, close_side, qty)
+    result = place_market_close(symbol, close_side, qty_float)
 
     time.sleep(0.7)
 
@@ -1045,10 +1095,10 @@ def close_position(symbol: str, reason: str, exit_bar_time=None):
 
     if direction == "LONG":
         pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-        pnl_usdt = (exit_price - entry_price) * qty
+        pnl_usdt = (exit_price - entry_price) * qty_float
     else:
         pnl_pct = ((entry_price - exit_price) / entry_price) * 100
-        pnl_usdt = (entry_price - exit_price) * qty
+        pnl_usdt = (entry_price - exit_price) * qty_float
 
     log_trade(
         symbol=symbol,
@@ -1057,7 +1107,7 @@ def close_position(symbol: str, reason: str, exit_bar_time=None):
         entry_type=state[symbol]["recent_entry_type"],
         entry_price=entry_price,
         exit_price=exit_price,
-        qty=qty,
+        qty=qty_float,
         pnl_usdt=pnl_usdt,
         pnl_pct=pnl_pct,
         exit_reason=reason,
@@ -1316,6 +1366,7 @@ def bootstrap_state():
 
                 state[symbol]["position_qty"] = pos["size"]
                 state[symbol]["position_entry_price"] = pos["avg_price"]
+                state[symbol]["original_entry_price"] = pos["avg_price"]
 
         except Exception as e:
             log_error(
@@ -1331,12 +1382,13 @@ def bootstrap_state():
 # main
 # =========================================================
 def main():
-    print(f"[{now_kst_str()}] === Bybit Auto Bot relaxed tuned version start ===")
+    print(f"[{now_kst_str()}] === Bybit Auto Bot relaxed stable version start ===")
     bootstrap_state()
 
     send_telegram_message(
-        f"[봇 시작]\n상태: 살짝 완화 튜닝 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
-        key="bot_start_relaxed"
+        f"[봇 시작]\n상태: 알림+에러수정 안정화 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
+        key="bot_start_relaxed",
+        force=True
     )
 
     while True:
@@ -1363,11 +1415,26 @@ def main():
                 order_failed=False,
                 api_message=""
             )
+            send_telegram_message(
+                f"[치명적 에러]\nmain_loop 중단 가능성\n내용: {str(e)[:300]}\n시간: {now_kst_str()}",
+                key="fatal_main_loop",
+                force=True
+            )
             print(f"[{now_kst_str()}] SYSTEM ERROR: {e}")
+            time.sleep(5)
 
         print(f"[{now_kst_str()}] ----- sleep {LOOP_SLEEP_SEC}s -----")
         time.sleep(LOOP_SLEEP_SEC)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        log_error("SYSTEM", "__main__", f"{e}\n{traceback.format_exc()}")
+        send_telegram_message(
+            f"[봇 비정상 종료]\n내용: {str(e)[:300]}\n시간: {now_kst_str()}",
+            key="bot_crash",
+            force=True
+        )
+        raise
