@@ -161,6 +161,13 @@
 
         <div class="card-grid">
             <div class="card">
+                <h2>봇 상태</h2>
+                <div class="value {% if bot_status == 'ON' %}win{% else %}loss{% endif %}">
+                    {{ bot_status }}
+                </div>
+            </div>
+
+            <div class="card">
                 <h2>총 거래 수</h2>
                 <div class="value">{{ summary.total_trades }}</div>
             </div>

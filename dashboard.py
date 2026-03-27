@@ -1,6 +1,7 @@
 from flask import Flask, render_template, send_file
-import csv
 import os
+import csv
+import subprocess
 
 app = Flask(__name__)
 
@@ -10,6 +11,18 @@ TRADE_LOG_FILE = os.path.join(BASE_DIR, "trade_log.csv")
 BOT_LOG_FILE = os.path.join(BASE_DIR, "bot.log")
 STATUS_LOG_FILE = os.path.join(BASE_DIR, "status_log.csv")
 BALANCE_LOG_FILE = os.path.join(BASE_DIR, "balance_log.csv")
+
+
+def get_bot_status():
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "main.py"],
+            capture_output=True,
+            text=True
+        )
+        return "ON" if result.returncode == 0 else "OFF"
+    except Exception:
+        return "OFF"
 
 
 def load_trade_data():
@@ -127,11 +140,13 @@ def dashboard():
     trades = load_trade_data()
     summary = get_trade_summary(trades)
     strategy_stats = get_strategy_stats(trades)
+    bot_status = get_bot_status()
 
     return render_template(
         "dashboard.html",
         summary=summary,
-        strategy_stats=strategy_stats
+        strategy_stats=strategy_stats,
+        bot_status=bot_status
     )
 
 
