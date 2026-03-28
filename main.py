@@ -6,6 +6,7 @@ import math
 import traceback
 import atexit
 import signal
+from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from datetime import datetime
 from pathlib import Path
 
@@ -25,6 +26,7 @@ load_dotenv()
 DEMO_MODE = True
 CATEGORY = "linear"
 
+# 중간버전: 너무 적지도, 너무 많지도 않게
 SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -35,8 +37,8 @@ SYMBOLS = [
 ]
 
 # 타임프레임
-HIGHER_INTERVAL = "60"
-ENTRY_INTERVAL = "15"
+HIGHER_INTERVAL = "60"   # 1시간
+ENTRY_INTERVAL = "15"    # 15분
 
 # 상위 TF 지표
 HTF_EMA_FAST = 50
@@ -49,25 +51,24 @@ ADX_PERIOD = 14
 ATR_PERIOD = 14
 VOL_MA_PERIOD = 20
 
-# 진입 조건 (살짝 완화)
+# 중간버전 진입 조건
 ADX_MIN = 18
-ADX_STRONG = 26
+ADX_STRONG = 25
 B_PULLBACK_VALID_BARS = 5
-MIN_BODY_RATIO = 0.28
-MIN_VOL_RATIO_A = 0.95
-MIN_VOL_RATIO_B = 1.00
+MIN_BODY_RATIO = 0.30
+MIN_VOL_RATIO_A = 1.00
+MIN_VOL_RATIO_B = 1.02
 
 # 리스크
 RISK_PER_TRADE = 0.01
-STOP_ATR_MULTIPLIER = 1.6
+STOP_ATR_MULTIPLIER = 1.4
 
-# 부분익절 / 기대값 강화
-PARTIAL_TP_R_MULTIPLIER = 1.8
-PARTIAL_CLOSE_RATIO = 0.35
+# 부분익절 / 트레일링 (중간값)
+PARTIAL_TP_R_MULTIPLIER = 1.6
+PARTIAL_CLOSE_RATIO = 0.40
 
-# 트레일링
-TRAIL_ACTIVATE_ATR = 2.0
-TRAIL_ATR_MULTIPLIER = 1.4
+TRAIL_ACTIVATE_ATR = 1.8
+TRAIL_ATR_MULTIPLIER = 1.3
 
 # 노출 제한
 MAX_POSITION_RATIO = 0.30
@@ -97,7 +98,7 @@ ERROR_LOG = BASE_DIR / "error_log.csv"
 session = HTTP(
     demo=DEMO_MODE,
     api_key=os.getenv("BYBIT_API_KEY"),
-    api_secret=os.getenv("BYBIT_API_SECRET"),
+    api_secret=os.getenv("BYBIT_API_SECRET")
 )
 
 instrument_cache = {}
@@ -113,6 +114,7 @@ state = {
         "position_side": "NONE",
         "position_qty": 0.0,
         "position_entry_price": 0.0,
+        "original_entry_price": 0.0,
 
         "last_entry_time": None,
         "last_exit_time": None,
@@ -137,7 +139,6 @@ state = {
         "entry_adx": None,
         "entry_atr": None,
         "entry_vol_ratio": None,
-        "original_entry_price": None,
 
         "pullback_active": False,
         "pullback_direction": "",
@@ -168,6 +169,15 @@ def safe_float(value, default=0.0):
         return default
 
 
+def safe_decimal(value, default="0"):
+    try:
+        if value in ("", None):
+            return Decimal(default)
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal(default)
+
+
 def should_send_telegram(key: str) -> bool:
     now_ts = time.time()
     last_ts = last_telegram_sent.get(key, 0)
@@ -189,7 +199,11 @@ def send_telegram_message(text: str, key: str = "default", force: bool = False):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+    }
+
     try:
         requests.post(url, data=payload, timeout=TELEGRAM_TIMEOUT_SEC)
     except Exception:
@@ -307,34 +321,44 @@ def log_trade(
     append_csv_row(TRADE_LOG, row)
 
 
-def decimals_from_step(step: float) -> int:
-    s = f"{step:.18f}".rstrip("0")
-    if "." in s:
-        return len(s.split(".")[1])
+def decimals_from_step(step_value) -> int:
+    step_str = format(safe_decimal(step_value), "f").rstrip("0")
+    if "." in step_str:
+        return len(step_str.split(".")[1])
     return 0
 
 
-def normalize_qty(qty: float, step: float, min_qty: float) -> float:
-    if qty <= 0 or step <= 0:
+def normalize_qty(qty: float, step_value, min_qty_value) -> float:
+    qty_dec = safe_decimal(qty)
+    step_dec = safe_decimal(step_value)
+    min_qty_dec = safe_decimal(min_qty_value)
+
+    if qty_dec <= 0 or step_dec <= 0:
         return 0.0
 
-    decimals = decimals_from_step(step)
-    qty = math.floor(qty / step) * step
-    qty = round(qty, decimals)
+    normalized = (qty_dec / step_dec).to_integral_value(rounding=ROUND_DOWN) * step_dec
 
-    if qty < min_qty:
+    if normalized < min_qty_dec:
         return 0.0
 
-    return qty
+    return float(normalized)
 
 
 def format_qty_for_order(symbol: str, qty: float) -> str:
     info = get_instrument_info(symbol)
-    normalized = normalize_qty(qty, info["qty_step"], info["min_order_qty"])
-    if normalized <= 0:
+    step_dec = safe_decimal(info["qty_step_str"])
+    min_qty_dec = safe_decimal(info["min_order_qty_str"])
+    qty_dec = safe_decimal(qty)
+
+    if qty_dec <= 0 or step_dec <= 0:
         return "0"
 
-    decimals = decimals_from_step(info["qty_step"])
+    normalized = (qty_dec / step_dec).to_integral_value(rounding=ROUND_DOWN) * step_dec
+
+    if normalized < min_qty_dec:
+        return "0"
+
+    decimals = decimals_from_step(info["qty_step_str"])
     return f"{normalized:.{decimals}f}"
 
 
@@ -348,19 +372,22 @@ def reset_position_state(symbol: str):
     state[symbol]["position_side"] = "NONE"
     state[symbol]["position_qty"] = 0.0
     state[symbol]["position_entry_price"] = 0.0
+    state[symbol]["original_entry_price"] = 0.0
+
     state[symbol]["highest_price"] = None
     state[symbol]["lowest_price"] = None
     state[symbol]["entry_stop_price"] = None
     state[symbol]["initial_stop_distance"] = None
     state[symbol]["trail_active"] = False
     state[symbol]["trail_price"] = None
+
     state[symbol]["partial_tp_price"] = None
     state[symbol]["partial_exit_done"] = False
+
     state[symbol]["recent_entry_type"] = ""
     state[symbol]["entry_adx"] = None
     state[symbol]["entry_atr"] = None
     state[symbol]["entry_vol_ratio"] = None
-    state[symbol]["original_entry_price"] = None
 
 
 def reset_pullback_state(symbol: str):
@@ -408,12 +435,14 @@ def get_instrument_info(symbol: str):
     result = session.get_instruments_info(category=CATEGORY, symbol=symbol)
     info = result["result"]["list"][0]
 
-    qty_step = safe_float(info["lotSizeFilter"]["qtyStep"])
-    min_order_qty = safe_float(info["lotSizeFilter"]["minOrderQty"])
+    qty_step_str = str(info["lotSizeFilter"]["qtyStep"])
+    min_order_qty_str = str(info["lotSizeFilter"]["minOrderQty"])
 
     instrument_cache[symbol] = {
-        "qty_step": qty_step,
-        "min_order_qty": min_order_qty,
+        "qty_step": safe_float(qty_step_str),
+        "min_order_qty": safe_float(min_order_qty_str),
+        "qty_step_str": qty_step_str,
+        "min_order_qty_str": min_order_qty_str,
     }
     return instrument_cache[symbol]
 
@@ -831,7 +860,11 @@ def compute_position_qty(symbol: str, equity: float, entry_price: float, atr: fl
     clamped_notional = min(raw_notional, max_notional)
 
     final_qty = clamped_notional / entry_price
-    final_qty = normalize_qty(final_qty, info["qty_step"], info["min_order_qty"])
+    final_qty = normalize_qty(
+        final_qty,
+        info["qty_step_str"],
+        info["min_order_qty_str"]
+    )
 
     if final_qty <= 0:
         return 0.0, stop_distance, clamped_notional
@@ -873,6 +906,9 @@ def sync_state_with_exchange(symbol: str):
     state[symbol]["position_qty"] = pos["size"]
     state[symbol]["position_entry_price"] = pos["avg_price"]
 
+    if state[symbol]["original_entry_price"] <= 0:
+        state[symbol]["original_entry_price"] = pos["avg_price"]
+
     last_price = get_ticker_price(symbol)
 
     if side == "LONG":
@@ -908,13 +944,12 @@ def open_position(symbol: str, direction: str, entry_type: str, signal: dict, wa
     if consume_skip_if_needed(symbol, direction):
         return False, "skip_after_2_losses"
 
-    info = get_instrument_info(symbol)
-    qty = normalize_qty(qty, info["qty_step"], info["min_order_qty"])
-    if qty <= 0:
+    qty_str = format_qty_for_order(symbol, qty)
+    if qty_str == "0":
         return False, "qty_zero_after_normalize"
 
     side = "Buy" if direction == "LONG" else "Sell"
-    result = place_market_entry(symbol, side, qty)
+    result = place_market_entry(symbol, side, float(qty_str))
 
     time.sleep(0.5)
     pos = get_position_from_exchange(symbol)
@@ -923,7 +958,7 @@ def open_position(symbol: str, direction: str, entry_type: str, signal: dict, wa
         actual_qty = pos["size"]
     else:
         actual_entry_price = get_ticker_price(symbol)
-        actual_qty = qty
+        actual_qty = float(qty_str)
 
     state[symbol]["position_side"] = direction
     state[symbol]["position_qty"] = actual_qty
@@ -994,7 +1029,11 @@ def close_partial_position(symbol: str, reason: str):
     info = get_instrument_info(symbol)
 
     partial_qty = current_qty * PARTIAL_CLOSE_RATIO
-    partial_qty = normalize_qty(partial_qty, info["qty_step"], info["min_order_qty"])
+    partial_qty = normalize_qty(
+        partial_qty,
+        info["qty_step_str"],
+        info["min_order_qty_str"]
+    )
 
     if partial_qty <= 0:
         print(f"[{now_kst_str()}] {symbol} PARTIAL SKIP | qty too small")
@@ -1002,11 +1041,10 @@ def close_partial_position(symbol: str, reason: str):
 
     remaining_after_partial = normalize_qty(
         current_qty - partial_qty,
-        info["qty_step"],
-        info["min_order_qty"]
+        info["qty_step_str"],
+        info["min_order_qty_str"]
     )
 
-    # 남은 잔량이 최소수량 미만이면 부분익절 대신 전량청산
     if remaining_after_partial <= 0:
         print(f"[{now_kst_str()}] {symbol} PARTIAL -> FULL CLOSE | remain too small")
         return close_position(symbol, "부분익절대신전량청산")
@@ -1057,7 +1095,6 @@ def close_partial_position(symbol: str, reason: str):
         return True
 
     state[symbol]["position_qty"] = remaining_pos["size"]
-    # 원래 진입가는 유지
     state[symbol]["position_entry_price"] = state[symbol]["original_entry_price"]
     state[symbol]["partial_exit_done"] = True
     state[symbol]["entry_stop_price"] = state[symbol]["original_entry_price"]
@@ -1382,12 +1419,12 @@ def bootstrap_state():
 # main
 # =========================================================
 def main():
-    print(f"[{now_kst_str()}] === Bybit Auto Bot relaxed stable version start ===")
+    print(f"[{now_kst_str()}] === Bybit Auto Bot middle version start ===")
     bootstrap_state()
 
     send_telegram_message(
-        f"[봇 시작]\n상태: 알림+에러수정 안정화 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
-        key="bot_start_relaxed",
+        f"[봇 시작]\n상태: 중간버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
+        key="bot_start_middle",
         force=True
     )
 
