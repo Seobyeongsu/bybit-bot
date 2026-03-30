@@ -2,7 +2,6 @@ from pybit.unified_trading import HTTP
 from dotenv import load_dotenv
 import os
 import time
-import math
 import traceback
 import atexit
 import signal
@@ -26,7 +25,6 @@ load_dotenv()
 DEMO_MODE = True
 CATEGORY = "linear"
 
-# 중간버전: 너무 적지도, 너무 많지도 않게
 SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -37,8 +35,8 @@ SYMBOLS = [
 ]
 
 # 타임프레임
-HIGHER_INTERVAL = "60"   # 1시간
-ENTRY_INTERVAL = "15"    # 15분
+HIGHER_INTERVAL = "60"
+ENTRY_INTERVAL = "15"
 
 # 상위 TF 지표
 HTF_EMA_FAST = 50
@@ -51,7 +49,7 @@ ADX_PERIOD = 14
 ATR_PERIOD = 14
 VOL_MA_PERIOD = 20
 
-# 중간버전 진입 조건
+# 진입 조건
 ADX_MIN = 18
 ADX_STRONG = 25
 B_PULLBACK_VALID_BARS = 5
@@ -59,11 +57,17 @@ MIN_BODY_RATIO = 0.30
 MIN_VOL_RATIO_A = 1.00
 MIN_VOL_RATIO_B = 1.02
 
+# 개선된 B 전략 조건
+USE_B_STRATEGY = True
+B_MAX_DISTANCE_FROM_EMA21_ATR = 0.80   # 너무 멀리 간 추격 진입 금지
+B_REQUIRE_ADX_IMPROVING = True
+B_REQUIRE_CLOSE_BETTER_THAN_OPEN = True
+
 # 리스크
 RISK_PER_TRADE = 0.01
 STOP_ATR_MULTIPLIER = 1.4
 
-# 부분익절 / 트레일링 (중간값)
+# 부분익절 / 트레일링
 PARTIAL_TP_R_MULTIPLIER = 1.6
 PARTIAL_CLOSE_RATIO = 0.40
 
@@ -669,6 +673,7 @@ def update_pullback_state(symbol: str, signal: dict):
         if elapsed > B_PULLBACK_VALID_BARS:
             reset_pullback_state(symbol)
 
+    # LONG 눌림 준비: EMA21 터치 근처에서만
     if (
         not state[symbol]["pullback_active"]
         and not state[symbol]["b_used_in_trend"]
@@ -685,6 +690,7 @@ def update_pullback_state(symbol: str, signal: dict):
             ref_low=safe_float(signal["current_low"]),
         )
 
+    # SHORT 눌림 준비: EMA21 터치 근처에서만
     if (
         not state[symbol]["pullback_active"]
         and not state[symbol]["b_used_in_trend"]
@@ -771,6 +777,9 @@ def get_entry_signal(symbol: str):
 
 
 def get_B_signal(symbol: str, signal: dict):
+    if not USE_B_STRATEGY:
+        return False, ""
+
     if not state[symbol]["pullback_active"]:
         return False, ""
 
@@ -787,20 +796,41 @@ def get_B_signal(symbol: str, signal: dict):
     if signal["body_ratio"] < MIN_BODY_RATIO:
         return False, ""
 
+    if B_REQUIRE_ADX_IMPROVING and not signal["adx_improving"]:
+        return False, ""
+
+    atr = signal["atr"]
+    if atr <= 0:
+        return False, ""
+
+    distance_from_ema21 = abs(signal["current_price"] - signal["ema21"])
+    if distance_from_ema21 > atr * B_MAX_DISTANCE_FROM_EMA21_ATR:
+        return False, ""
+
     if direction == "LONG":
         ref_high = state[symbol]["pullback_ref_high"]
+
+        if B_REQUIRE_CLOSE_BETTER_THAN_OPEN and signal["current_price"] <= signal["current_open"]:
+            return False, ""
+
         if (
             signal["current_price"] > ref_high
             and signal["ema9"] > signal["ema21"]
+            and signal["current_price"] > signal["ema21"]
             and signal["vol_ratio"] >= MIN_VOL_RATIO_B
         ):
             return True, "LONG"
 
     if direction == "SHORT":
         ref_low = state[symbol]["pullback_ref_low"]
+
+        if B_REQUIRE_CLOSE_BETTER_THAN_OPEN and signal["current_price"] >= signal["current_open"]:
+            return False, ""
+
         if (
             signal["current_price"] < ref_low
             and signal["ema9"] < signal["ema21"]
+            and signal["current_price"] < signal["ema21"]
             and signal["vol_ratio"] >= MIN_VOL_RATIO_B
         ):
             return True, "SHORT"
@@ -1419,12 +1449,12 @@ def bootstrap_state():
 # main
 # =========================================================
 def main():
-    print(f"[{now_kst_str()}] === Bybit Auto Bot middle version start ===")
+    print(f"[{now_kst_str()}] === Bybit Auto Bot improved B pullback version start ===")
     bootstrap_state()
 
     send_telegram_message(
-        f"[봇 시작]\n상태: 중간버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
-        key="bot_start_middle",
+        f"[봇 시작]\n상태: 개선된 B 눌림전략 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
+        key="bot_start_improved_b",
         force=True
     )
 
