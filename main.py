@@ -49,38 +49,40 @@ ADX_PERIOD = 14
 ATR_PERIOD = 14
 VOL_MA_PERIOD = 20
 
-# 진입 조건
-ADX_MIN = 18
-ADX_STRONG = 25
-B_PULLBACK_VALID_BARS = 5
+# =========================================================
+# A 전략 전용 필터 (횡보장 차단 강화)
+# =========================================================
+USE_B_STRATEGY = False
+
+# A 진입 기준 강화
+ADX_MIN = 22
+ADX_STRONG = 28
 MIN_BODY_RATIO = 0.30
 MIN_VOL_RATIO_A = 1.00
-MIN_VOL_RATIO_B = 1.02
 
-# 개선된 B 전략 조건
-USE_B_STRATEGY = True
-B_MAX_DISTANCE_FROM_EMA21_ATR = 0.80   # 너무 멀리 간 추격 진입 금지
-B_REQUIRE_ADX_IMPROVING = True
-B_REQUIRE_CLOSE_BETTER_THAN_OPEN = True
+# A 전략 추가 필터
+REQUIRE_ADX_IMPROVING_FOR_A = True
+ENTRY_EMA_SPREAD_ATR_MIN = 0.18      # ema9, ema21 간격이 ATR 대비 너무 좁으면 진입 금지
+HTF_EMA_SPREAD_PCT_MIN = 0.0018      # ema50, ema200 간격이 가격 대비 너무 좁으면 진입 금지
+REQUIRE_HTF_SLOPE_OK = True          # 상위추세 slope 약하면 진입 금지
 
 # 리스크
 RISK_PER_TRADE = 0.01
-STOP_ATR_MULTIPLIER = 1.4
+STOP_ATR_MULTIPLIER = 1.25
 
 # 부분익절 / 트레일링
-PARTIAL_TP_R_MULTIPLIER = 1.6
+PARTIAL_TP_R_MULTIPLIER = 1.8
 PARTIAL_CLOSE_RATIO = 0.40
-
-TRAIL_ACTIVATE_ATR = 1.8
-TRAIL_ATR_MULTIPLIER = 1.3
+TRAIL_ACTIVATE_ATR = 2.2
+TRAIL_ATR_MULTIPLIER = 1.4
 
 # 노출 제한
 MAX_POSITION_RATIO = 0.30
 MAX_TOTAL_EXPOSURE = 0.45
 
 # 재진입 제한
-REENTRY_BLOCK_BARS = 3
-STRONG_TREND_REENTRY_BARS = 2
+REENTRY_BLOCK_BARS = 4
+STRONG_TREND_REENTRY_BARS = 3
 
 # 루프
 LOOP_SLEEP_SEC = 30
@@ -593,7 +595,7 @@ def get_higher_tf_trend(symbol: str):
 
     closed = df.iloc[:-1].copy().reset_index(drop=True)
     if len(closed) < HTF_EMA_SLOW + 5:
-        return "NONE", False
+        return "NONE", False, 0.0, 0.0, 0.0
 
     last = closed.iloc[-1]
     prev = closed.iloc[-2]
@@ -601,15 +603,17 @@ def get_higher_tf_trend(symbol: str):
     ema50 = safe_float(last["ema50"])
     ema200 = safe_float(last["ema200"])
     ema50_prev = safe_float(prev["ema50"])
+    price = safe_float(last["close"])
 
     slope_ok_up = ema50 >= ema50_prev
     slope_ok_down = ema50 <= ema50_prev
+    spread_pct = abs(ema50 - ema200) / price if price > 0 else 0.0
 
     if ema50 > ema200:
-        return "UP", slope_ok_up
+        return "UP", slope_ok_up, ema50, ema200, spread_pct
     if ema50 < ema200:
-        return "DOWN", slope_ok_down
-    return "NONE", False
+        return "DOWN", slope_ok_down, ema50, ema200, spread_pct
+    return "NONE", False, ema50, ema200, spread_pct
 
 
 def get_entry_tf_data(symbol: str):
@@ -647,65 +651,6 @@ def adx_is_improving(prev2, prev1, current):
     if safe_float(current["adx"]) > safe_float(prev1["adx"]):
         up_count += 1
     return up_count >= 1
-
-
-def prepare_pullback_state(symbol: str, direction: str, current_bar_time, ref_high: float, ref_low: float):
-    if state[symbol]["b_used_in_trend"]:
-        return
-
-    state[symbol]["pullback_active"] = True
-    state[symbol]["pullback_direction"] = direction
-    state[symbol]["pullback_start_bar"] = current_bar_time
-    state[symbol]["pullback_ref_high"] = ref_high
-    state[symbol]["pullback_ref_low"] = ref_low
-
-
-def update_pullback_state(symbol: str, signal: dict):
-    bar_time = signal["bar_time"]
-    interval_minutes = interval_to_minutes(ENTRY_INTERVAL)
-
-    if state[symbol]["pullback_active"]:
-        elapsed = bars_diff(
-            state[symbol]["pullback_start_bar"],
-            bar_time,
-            interval_minutes
-        )
-        if elapsed > B_PULLBACK_VALID_BARS:
-            reset_pullback_state(symbol)
-
-    # LONG 눌림 준비: EMA21 터치 근처에서만
-    if (
-        not state[symbol]["pullback_active"]
-        and not state[symbol]["b_used_in_trend"]
-        and signal["ema9"] > signal["ema21"]
-        and signal["adx_ok"]
-        and signal["vol_ratio"] >= MIN_VOL_RATIO_B
-        and safe_float(signal["current_low"]) <= safe_float(signal["ema21"]) <= safe_float(signal["current_high"])
-    ):
-        prepare_pullback_state(
-            symbol=symbol,
-            direction="LONG",
-            current_bar_time=bar_time,
-            ref_high=safe_float(signal["current_high"]),
-            ref_low=safe_float(signal["current_low"]),
-        )
-
-    # SHORT 눌림 준비: EMA21 터치 근처에서만
-    if (
-        not state[symbol]["pullback_active"]
-        and not state[symbol]["b_used_in_trend"]
-        and signal["ema9"] < signal["ema21"]
-        and signal["adx_ok"]
-        and signal["vol_ratio"] >= MIN_VOL_RATIO_B
-        and safe_float(signal["current_low"]) <= safe_float(signal["ema21"]) <= safe_float(signal["current_high"])
-    ):
-        prepare_pullback_state(
-            symbol=symbol,
-            direction="SHORT",
-            current_bar_time=bar_time,
-            ref_high=safe_float(signal["current_high"]),
-            ref_low=safe_float(signal["current_low"]),
-        )
 
 
 def get_entry_signal(symbol: str):
@@ -748,6 +693,8 @@ def get_entry_signal(symbol: str):
     adx_strong = adx >= ADX_STRONG
     adx_improving = adx_is_improving(p2, p1, c)
 
+    ema_spread_atr = abs(ema9 - ema21) / atr if atr > 0 else 0.0
+
     signal = {
         "bar_time": bar_time,
         "current_open": current_open,
@@ -763,12 +710,10 @@ def get_entry_signal(symbol: str):
         "adx_ok": adx_ok,
         "adx_strong": adx_strong,
         "adx_improving": adx_improving,
+        "ema_spread_atr": ema_spread_atr,
 
         "long_A": bullish_cross and vol_ratio >= MIN_VOL_RATIO_A and body_ratio >= MIN_BODY_RATIO,
         "short_A": bearish_cross and vol_ratio >= MIN_VOL_RATIO_A and body_ratio >= MIN_BODY_RATIO,
-
-        "prev1_high": safe_float(p1["high"]),
-        "prev1_low": safe_float(p1["low"]),
 
         "reverse_cross_for_long_exit": bearish_cross,
         "reverse_cross_for_short_exit": bullish_cross,
@@ -777,64 +722,6 @@ def get_entry_signal(symbol: str):
 
 
 def get_B_signal(symbol: str, signal: dict):
-    if not USE_B_STRATEGY:
-        return False, ""
-
-    if not state[symbol]["pullback_active"]:
-        return False, ""
-
-    direction = state[symbol]["pullback_direction"]
-    elapsed = bars_diff(
-        state[symbol]["pullback_start_bar"],
-        signal["bar_time"],
-        interval_to_minutes(ENTRY_INTERVAL)
-    )
-    if elapsed > B_PULLBACK_VALID_BARS:
-        reset_pullback_state(symbol)
-        return False, ""
-
-    if signal["body_ratio"] < MIN_BODY_RATIO:
-        return False, ""
-
-    if B_REQUIRE_ADX_IMPROVING and not signal["adx_improving"]:
-        return False, ""
-
-    atr = signal["atr"]
-    if atr <= 0:
-        return False, ""
-
-    distance_from_ema21 = abs(signal["current_price"] - signal["ema21"])
-    if distance_from_ema21 > atr * B_MAX_DISTANCE_FROM_EMA21_ATR:
-        return False, ""
-
-    if direction == "LONG":
-        ref_high = state[symbol]["pullback_ref_high"]
-
-        if B_REQUIRE_CLOSE_BETTER_THAN_OPEN and signal["current_price"] <= signal["current_open"]:
-            return False, ""
-
-        if (
-            signal["current_price"] > ref_high
-            and signal["ema9"] > signal["ema21"]
-            and signal["current_price"] > signal["ema21"]
-            and signal["vol_ratio"] >= MIN_VOL_RATIO_B
-        ):
-            return True, "LONG"
-
-    if direction == "SHORT":
-        ref_low = state[symbol]["pullback_ref_low"]
-
-        if B_REQUIRE_CLOSE_BETTER_THAN_OPEN and signal["current_price"] >= signal["current_open"]:
-            return False, ""
-
-        if (
-            signal["current_price"] < ref_low
-            and signal["ema9"] < signal["ema21"]
-            and signal["current_price"] < signal["ema21"]
-            and signal["vol_ratio"] >= MIN_VOL_RATIO_B
-        ):
-            return True, "SHORT"
-
     return False, ""
 
 
@@ -1017,10 +904,6 @@ def open_position(symbol: str, direction: str, entry_type: str, signal: dict, wa
         state[symbol]["partial_tp_price"] = actual_entry_price - (stop_distance * PARTIAL_TP_R_MULTIPLIER)
         state[symbol]["lowest_price"] = actual_entry_price
         state[symbol]["highest_price"] = None
-
-    if entry_type == "B":
-        state[symbol]["b_used_in_trend"] = True
-        reset_pullback_state(symbol)
 
     log_trade(
         symbol=symbol,
@@ -1294,14 +1177,12 @@ def process_symbol(symbol: str, wallet_info: dict):
     try:
         sync_state_with_exchange(symbol)
 
-        higher_trend, slope_ok = get_higher_tf_trend(symbol)
+        higher_trend, slope_ok, htf_ema50, htf_ema200, htf_spread_pct = get_higher_tf_trend(symbol)
         update_trend_context(symbol, higher_trend)
 
         signal = get_entry_signal(symbol)
         if signal is None:
             return
-
-        update_pullback_state(symbol, signal)
 
         current_price = get_ticker_price(symbol)
         position_state = state[symbol]["position_side"]
@@ -1350,8 +1231,24 @@ def process_symbol(symbol: str, wallet_info: dict):
             print(f"[{now_kst_str()}] {symbol} NO TRADE | higher trend NONE")
             return
 
+        if REQUIRE_HTF_SLOPE_OK and not slope_ok:
+            print(f"[{now_kst_str()}] {symbol} NO TRADE | HTF slope weak")
+            return
+
+        if htf_spread_pct < HTF_EMA_SPREAD_PCT_MIN:
+            print(f"[{now_kst_str()}] {symbol} NO TRADE | HTF ema spread narrow")
+            return
+
         if not signal["adx_ok"]:
             print(f"[{now_kst_str()}] {symbol} NO TRADE | ADX low")
+            return
+
+        if REQUIRE_ADX_IMPROVING_FOR_A and not signal["adx_improving"]:
+            print(f"[{now_kst_str()}] {symbol} NO TRADE | ADX not improving")
+            return
+
+        if signal["ema_spread_atr"] < ENTRY_EMA_SPREAD_ATR_MIN:
+            print(f"[{now_kst_str()}] {symbol} NO TRADE | entry ema spread narrow")
             return
 
         if reentry_block_active(symbol, signal["bar_time"], signal["adx"]):
@@ -1370,20 +1267,11 @@ def process_symbol(symbol: str, wallet_info: dict):
             short_ready = True
             entry_type = "A"
 
-        else:
-            b_ok, b_dir = get_B_signal(symbol, signal)
-            if b_ok and higher_trend == "UP" and b_dir == "LONG":
-                long_ready = True
-                entry_type = "B"
-            elif b_ok and higher_trend == "DOWN" and b_dir == "SHORT":
-                short_ready = True
-                entry_type = "B"
-
         if long_ready:
             ok, reason = open_position(symbol, "LONG", entry_type, signal, wallet_info)
             print(
                 f"[{now_kst_str()}] {symbol} LONG READY | "
-                f"type={entry_type} | slope_ok={slope_ok} | result={ok} | reason={reason}"
+                f"type={entry_type} | slope_ok={slope_ok} | htf_spread={htf_spread_pct:.5f} | result={ok} | reason={reason}"
             )
             return
 
@@ -1391,13 +1279,14 @@ def process_symbol(symbol: str, wallet_info: dict):
             ok, reason = open_position(symbol, "SHORT", entry_type, signal, wallet_info)
             print(
                 f"[{now_kst_str()}] {symbol} SHORT READY | "
-                f"type={entry_type} | slope_ok={slope_ok} | result={ok} | reason={reason}"
+                f"type={entry_type} | slope_ok={slope_ok} | htf_spread={htf_spread_pct:.5f} | result={ok} | reason={reason}"
             )
             return
 
         print(
             f"[{now_kst_str()}] {symbol} NO TRADE | "
-            f"trend={higher_trend} | adx={signal['adx']:.2f} | vol={signal['vol_ratio']:.2f} | slope_ok={slope_ok}"
+            f"trend={higher_trend} | adx={signal['adx']:.2f} | vol={signal['vol_ratio']:.2f} | "
+            f"ema_spread_atr={signal['ema_spread_atr']:.3f} | htf_spread={htf_spread_pct:.5f}"
         )
 
     except Exception as e:
@@ -1449,12 +1338,12 @@ def bootstrap_state():
 # main
 # =========================================================
 def main():
-    print(f"[{now_kst_str()}] === Bybit Auto Bot improved B pullback version start ===")
+    print(f"[{now_kst_str()}] === Bybit Auto Bot A-only stable filter version start ===")
     bootstrap_state()
 
     send_telegram_message(
-        f"[봇 시작]\n상태: 개선된 B 눌림전략 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
-        key="bot_start_improved_b",
+        f"[봇 시작]\n상태: A전략 안정화 버전 시작\n심볼: {', '.join(SYMBOLS)}\n시간: {now_kst_str()}",
+        key="bot_start_a_only_stable",
         force=True
     )
 
