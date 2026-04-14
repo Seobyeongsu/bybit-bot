@@ -25,22 +25,24 @@
 
         .sub {
             color: #9ca3af;
-            margin-bottom: 24px;
+            margin-bottom: 16px;
         }
 
+        .mode-buttons,
         .download-buttons {
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
-            margin-bottom: 24px;
+            margin-bottom: 16px;
         }
 
+        .mode-buttons a,
         .download-buttons a {
             text-decoration: none;
         }
 
+        .mode-buttons button,
         .download-buttons button {
-            background: #2563eb;
             color: white;
             border: none;
             padding: 10px 16px;
@@ -49,13 +51,33 @@
             font-size: 14px;
         }
 
+        .mode-buttons button {
+            background: #374151;
+        }
+
+        .mode-buttons .active {
+            background: #16a34a;
+        }
+
+        .download-buttons button {
+            background: #2563eb;
+        }
+
+        .mode-buttons button:hover {
+            background: #4b5563;
+        }
+
+        .mode-buttons .active:hover {
+            background: #15803d;
+        }
+
         .download-buttons button:hover {
             background: #1d4ed8;
         }
 
         .card-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 16px;
             margin-bottom: 30px;
         }
@@ -141,6 +163,7 @@
                 padding: 10px 6px;
             }
 
+            .mode-buttons button,
             .download-buttons button {
                 width: 100%;
             }
@@ -150,13 +173,22 @@
 <body>
     <div class="container">
         <h1>Bybit Bot Dashboard</h1>
-        <div class="sub">자동매매 현황 / 승률 / 손익 / 로그 다운로드</div>
+        <div class="sub">자동매매 현황 / 승률 / 손익 / 로그 다운로드 / 현재 모드: {{ mode|upper }}</div>
+
+        <div class="mode-buttons">
+            <a href="/?mode=demo">
+                <button class="{% if mode == 'demo' %}active{% endif %}">DEMO</button>
+            </a>
+            <a href="/?mode=live">
+                <button class="{% if mode == 'live' %}active{% endif %}">LIVE</button>
+            </a>
+        </div>
 
         <div class="download-buttons">
-            <a href="/download/trade-log"><button>거래로그 다운로드</button></a>
-            <a href="/download/bot-log"><button>봇로그 다운로드</button></a>
-            <a href="/download/status-log"><button>상태로그 다운로드</button></a>
-            <a href="/download/balance-log"><button>잔고로그 다운로드</button></a>
+            <a href="/download/trade-log?mode={{ mode }}"><button>거래로그 다운로드</button></a>
+            <a href="/download/bot-log?mode={{ mode }}"><button>봇로그 다운로드</button></a>
+            <a href="/download/status-log?mode={{ mode }}"><button>상태로그 다운로드</button></a>
+            <a href="/download/balance-log?mode={{ mode }}"><button>잔고로그 다운로드</button></a>
         </div>
 
         <div class="card-grid">
@@ -208,24 +240,19 @@
                     </tr>
                 </thead>
                 <tbody>
+                    {% for strategy_name, stats in strategy_stats.items() %}
+                    {% if stats.total > 0 or strategy_name in ['A', 'B', 'A1', 'A2', 'B1', 'B2'] %}
                     <tr>
-                        <td>A</td>
-                        <td>{{ strategy_stats["A"]["total"] }}</td>
-                        <td>{{ strategy_stats["A"]["win"] }}</td>
-                        <td>{{ strategy_stats["A"]["win_rate"] }}%</td>
-                        <td class="{% if strategy_stats['A']['pnl'] > 0 %}win{% elif strategy_stats['A']['pnl'] < 0 %}loss{% else %}neutral{% endif %}">
-                            {{ strategy_stats["A"]["pnl"] }}
+                        <td>{{ strategy_name }}</td>
+                        <td>{{ stats["total"] }}</td>
+                        <td>{{ stats["win"] }}</td>
+                        <td>{{ stats["win_rate"] }}%</td>
+                        <td class="{% if stats['pnl'] > 0 %}win{% elif stats['pnl'] < 0 %}loss{% else %}neutral{% endif %}">
+                            {{ stats["pnl"] }}
                         </td>
                     </tr>
-                    <tr>
-                        <td>B</td>
-                        <td>{{ strategy_stats["B"]["total"] }}</td>
-                        <td>{{ strategy_stats["B"]["win"] }}</td>
-                        <td>{{ strategy_stats["B"]["win_rate"] }}%</td>
-                        <td class="{% if strategy_stats['B']['pnl'] > 0 %}win{% elif strategy_stats['B']['pnl'] < 0 %}loss{% else %}neutral{% endif %}">
-                            {{ strategy_stats["B"]["pnl"] }}
-                        </td>
-                    </tr>
+                    {% endif %}
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
@@ -263,7 +290,7 @@
         </div>
 
         <div class="footer-note">
-            새로고침하면 최신 trade_log.csv 기준으로 다시 계산됩니다.
+            새로고침하면 현재 모드({{ mode|upper }})의 최신 로그 기준으로 다시 계산됩니다.
         </div>
     </div>
 </body>
