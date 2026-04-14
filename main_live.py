@@ -105,10 +105,10 @@ TELEGRAM_COOLDOWN_SEC = 120
 
 # 로그 파일
 BASE_DIR = Path(__file__).resolve().parent
-TRADE_LOG = BASE_DIR / "trade_log.csv"
-STATUS_LOG = BASE_DIR / "status_log.csv"
-BALANCE_LOG = BASE_DIR / "balance_log.csv"
-ERROR_LOG = BASE_DIR / "error_log.csv"
+TRADE_LOG = BASE_DIR / "trade_log_live.csv"
+STATUS_LOG = BASE_DIR / "status_log_live.csv"
+BALANCE_LOG = BASE_DIR / "balance_log_live.csv"
+ERROR_LOG = BASE_DIR / "error_log_live.csv"
 
 # API 세션
 session = HTTP(
