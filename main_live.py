@@ -66,16 +66,17 @@ REQUIRE_ADX_IMPROVING_FOR_A = False
 ENTRY_EMA_SPREAD_ATR_MIN = 0.08      # ema9, ema21 간격이 ATR 대비 너무 좁으면 진입 금지
 HTF_EMA_SPREAD_PCT_MIN = 0.0010      # ema50, ema200 간격이 가격 대비 너무 좁으면 진입 금지
 REQUIRE_HTF_SLOPE_OK = True          # 상위추세 slope 약하면 진입 금지
+
 # A2 지속형 진입 튜닝 (과진입 방지용 강화)
-CONT_PULLBACK_ATR_TOL = 0.18         # 눌림 허용폭 축소
-MIN_BODY_RATIO_CONT = 0.32           # 지속형은 몸통 더 강해야 함
-CONT_CLOSE_PROGRESS_MIN = 0.72       # 종가가 캔들 끝쪽에 가까워야 함
-CONT_RECENT_CLOSE_COUNT = 2          # 최근 3봉 중 최소 2봉 방향성 유지
-CONT_BOX_ATR_MIN = 2.6               # 최근 박스폭이 너무 좁으면 금지
-CONT_EMA_SPREAD_KEEP_RATIO = 0.95    # ema 간격 유지 강도 강화
-CONT_MIN_EMA_SPREAD_ATR = 0.12       # 지속형은 ema 간격이 더 벌어져 있어야 함
-CONT_REQUIRE_ADX_STRONG = True       # 지속형은 강한 추세에서만 허용
-CONT_REQUIRE_ADX_IMPROVING = True    # 지속형은 ADX 개선도 요구
+CONT_PULLBACK_ATR_TOL = 0.18
+MIN_BODY_RATIO_CONT = 0.32
+CONT_CLOSE_PROGRESS_MIN = 0.72
+CONT_RECENT_CLOSE_COUNT = 2
+CONT_BOX_ATR_MIN = 2.6
+CONT_EMA_SPREAD_KEEP_RATIO = 0.95
+CONT_MIN_EMA_SPREAD_ATR = 0.12
+CONT_REQUIRE_ADX_STRONG = True
+CONT_REQUIRE_ADX_IMPROVING = True
 
 # 리스크
 RISK_PER_TRADE = 0.01
@@ -225,6 +226,36 @@ def send_telegram_message(text: str, key: str = "default", force: bool = False):
         requests.post(url, data=payload, timeout=TELEGRAM_TIMEOUT_SEC)
     except Exception:
         pass
+
+
+def safe_api_call(func, *args, retries=4, delay=1.2, **kwargs):
+    last_error = None
+
+    for attempt in range(retries):
+        try:
+            return func(*args, **kwargs)
+
+        except Exception as e:
+            last_error = e
+            err_text = str(e)
+
+            # 바이비트 응답 헤더/레이트리밋/일시 네트워크 예외 방어
+            transient = (
+                "x-bapi-limit-reset-timestamp" in err_text
+                or "Read timed out" in err_text
+                or "Connection aborted" in err_text
+                or "Remote end closed connection" in err_text
+                or "too many visits" in err_text.lower()
+                or "rate limit" in err_text.lower()
+                or "timed out" in err_text.lower()
+            )
+
+            if transient:
+                time.sleep(delay + (attempt * 0.8))
+            else:
+                time.sleep(delay)
+
+    raise last_error
 
 
 def notify_shutdown(reason: str):
@@ -429,7 +460,10 @@ def reset_pullback_state(symbol: str):
 # Bybit API 헬퍼
 # =========================================================
 def get_wallet_info():
-    result = session.get_wallet_balance(accountType="UNIFIED")
+    result = safe_api_call(
+        session.get_wallet_balance,
+        accountType="UNIFIED"
+    )
     data = result["result"]["list"][0]
 
     total_equity = safe_float(data.get("totalEquity"))
@@ -451,7 +485,11 @@ def get_wallet_info():
 
 
 def get_ticker_price(symbol: str) -> float:
-    result = session.get_tickers(category=CATEGORY, symbol=symbol)
+    result = safe_api_call(
+        session.get_tickers,
+        category=CATEGORY,
+        symbol=symbol
+    )
     return safe_float(result["result"]["list"][0]["lastPrice"])
 
 
@@ -459,7 +497,11 @@ def get_instrument_info(symbol: str):
     if symbol in instrument_cache:
         return instrument_cache[symbol]
 
-    result = session.get_instruments_info(category=CATEGORY, symbol=symbol)
+    result = safe_api_call(
+        session.get_instruments_info,
+        category=CATEGORY,
+        symbol=symbol
+    )
     info = result["result"]["list"][0]
 
     qty_step_str = str(info["lotSizeFilter"]["qtyStep"])
@@ -475,7 +517,11 @@ def get_instrument_info(symbol: str):
 
 
 def get_position_from_exchange(symbol: str):
-    result = session.get_positions(category=CATEGORY, symbol=symbol)
+    result = safe_api_call(
+        session.get_positions,
+        category=CATEGORY,
+        symbol=symbol
+    )
     pos_list = result["result"]["list"]
 
     if not pos_list:
@@ -498,7 +544,8 @@ def get_position_from_exchange(symbol: str):
 
 def set_leverage(symbol: str, leverage: str = "3"):
     try:
-        session.set_leverage(
+        safe_api_call(
+            session.set_leverage,
             category=CATEGORY,
             symbol=symbol,
             buyLeverage=leverage,
@@ -514,7 +561,8 @@ def place_market_entry(symbol: str, side: str, qty: float):
     if qty_str == "0":
         raise ValueError(f"{symbol} entry qty invalid after normalize")
 
-    return session.place_order(
+    return safe_api_call(
+        session.place_order,
         category=CATEGORY,
         symbol=symbol,
         side=side,
@@ -529,7 +577,8 @@ def place_market_close(symbol: str, close_side: str, qty: float):
     if qty_str == "0":
         raise ValueError(f"{symbol} close qty invalid after normalize")
 
-    return session.place_order(
+    return safe_api_call(
+        session.place_order,
         category=CATEGORY,
         symbol=symbol,
         side=close_side,
@@ -544,7 +593,8 @@ def place_market_close(symbol: str, close_side: str, qty: float):
 # Kline / 지표
 # =========================================================
 def get_klines(symbol: str, interval: str, limit: int = 400) -> pd.DataFrame:
-    result = session.get_kline(
+    result = safe_api_call(
+        session.get_kline,
         category=CATEGORY,
         symbol=symbol,
         interval=interval,
