@@ -23,6 +23,7 @@ except Exception:
 load_dotenv(".env_demo")
 
 DEMO_MODE = True
+BOT_LABEL = "[데모]"
 CATEGORY = "linear"
 
 SYMBOLS = [
@@ -232,7 +233,7 @@ def notify_shutdown(reason: str):
         return
     shutdown_notified = True
     send_telegram_message(
-        f"[봇 종료]\n사유: {reason}\n시간: {now_kst_str()}",
+        f"{BOT_LABEL} [봇 종료]\n사유: {reason}\n시간: {now_kst_str()}",
         key="bot_shutdown",
         force=True
     )
@@ -281,9 +282,9 @@ def log_error(symbol: str, func_name: str, error_text: str, order_failed=False, 
     append_csv_row(ERROR_LOG, row)
 
     send_telegram_message(
-        f"[에러]\n심볼: {symbol}\n함수: {func_name}\n내용: {str(error_text)[:300]}\n시간: {now_kst_str()}",
-        key=f"error:{symbol}:{func_name}"
-    )
+    f"{BOT_LABEL} [에러]\n심볼: {symbol}\n함수: {func_name}\n내용: {str(error_text)[:300]}\n시간: {now_kst_str()}",
+    key=f"error:{symbol}:{func_name}"
+)
 
 
 def log_status(symbol: str, row_data: dict):
@@ -1014,7 +1015,7 @@ def open_position(symbol: str, direction: str, entry_type: str, signal: dict, wa
     )
 
     send_telegram_message(
-        f"[진입]\n심볼: {symbol}\n방향: {direction}\n타입: {entry_type}\n가격: {actual_entry_price}\n수량: {actual_qty}\nADX: {adx:.2f}\nVOL: {vol_ratio:.2f}\n시간: {now_kst_str()}",
+        f"{BOT_LABEL} [진입]\n심볼: {symbol}\n방향: {direction}\n타입: {entry_type}\n가격: {actual_entry_price}\n수량: {actual_qty}\nADX: {adx:.2f}\nVOL: {vol_ratio:.2f}\n시간: {now_kst_str()}",
         key=f"entry:{symbol}:{direction}"
     )
 
@@ -1086,7 +1087,7 @@ def close_partial_position(symbol: str, reason: str):
     )
 
     send_telegram_message(
-        f"[부분익절]\n심볼: {symbol}\n방향: {direction}\n사유: {reason}\n진입가: {entry_price}\n청산가: {exit_price}\n수량: {partial_qty}\n손익: {pnl_usdt:.4f} USDT\n수익률: {pnl_pct:.4f}%\n시간: {now_kst_str()}",
+        f"{BOT_LABEL} [부분익절]\n심볼: {symbol}\n방향: {direction}\n사유: {reason}\n진입가: {entry_price}\n청산가: {exit_price}\n수량: {partial_qty}\n손익: {pnl_usdt:.4f} USDT\n수익률: {pnl_pct:.4f}%\n시간: {now_kst_str()}",
         key=f"partial:{symbol}"
     )
 
@@ -1161,7 +1162,7 @@ def close_position(symbol: str, reason: str, exit_bar_time=None):
     update_loss_streak_and_skip(symbol, direction, pnl_usdt)
 
     send_telegram_message(
-        f"[청산]\n심볼: {symbol}\n방향: {direction}\n사유: {reason}\n진입가: {entry_price}\n청산가: {exit_price}\n손익: {pnl_usdt:.4f} USDT\n수익률: {pnl_pct:.4f}%\n시간: {now_kst_str()}",
+        f"{BOT_LABEL} [청산]\n심볼: {symbol}\n방향: {direction}\n사유: {reason}\n진입가: {entry_price}\n청산가: {exit_price}\n손익: {pnl_usdt:.4f} USDT\n수익률: {pnl_pct:.4f}%\n시간: {now_kst_str()}",
         key=f"exit:{symbol}:{reason}"
     )
 
@@ -1473,7 +1474,7 @@ def main():
                 api_message=""
             )
             send_telegram_message(
-                f"[치명적 에러]\nmain_loop 중단 가능성\n내용: {str(e)[:300]}\n시간: {now_kst_str()}",
+                f"{BOT_LABEL} [치명적 에러]\nmain_loop 중단 가능성\n내용: {str(e)[:300]}\n시간: {now_kst_str()}",
                 key="fatal_main_loop",
                 force=True
             )
@@ -1490,7 +1491,7 @@ if __name__ == "__main__":
     except Exception as e:
         log_error("SYSTEM", "__main__", f"{e}\n{traceback.format_exc()}")
         send_telegram_message(
-            f"[봇 비정상 종료]\n내용: {str(e)[:300]}\n시간: {now_kst_str()}",
+            f"{BOT_LABEL} [봇 비정상 종료]\n내용: {str(e)[:300]}\n시간: {now_kst_str()}",
             key="bot_crash",
             force=True
         )
